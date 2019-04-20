@@ -15,3 +15,5 @@ persistence.xml
 **/*.iml
 *.iml
 *.versionsBackup
+*.log
+*.tlog

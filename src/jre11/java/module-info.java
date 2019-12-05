@@ -1,3 +1,3 @@
-module com.armineasy.activitymaster.notifications {
+module com.guicedee.activitymaster.notifications {
 
 }

@@ -13,6 +13,10 @@
     <artifactId>notification-master</artifactId>
     <packaging>jar</packaging>
     <name>Notification Master</name>
+
+    <properties>
+        <project.scm.nameUrl>/Activity-Master/NotificationsMaster</project.scm.nameUrl>
+    </properties>
 	
     <dependencies>
      

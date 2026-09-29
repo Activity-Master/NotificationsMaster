@@ -22,9 +22,8 @@ import static com.guicedee.activitymaster.notifications.NotificationTaxonomy.*;
 /**
  * Installs only FSDM taxonomy. No notification is ever created at startup.
  * <p>
- * Bodies and structured payloads are stored as {@code ResourceItemXClassification} values, so the
- * installer first asserts that the column is PostgreSQL {@code text} rather than accepting
- * Hibernate's default {@code varchar(255)} and silently truncating every notification.
+ * Bodies and structured payloads are the data of a private resource item, not relationship
+ * values, so nothing here depends on the width of a link column.
  */
 @SortedUpdate(sortOrder = 1400, taskCount = 1)
 public final class NotificationInstall implements ISystemUpdate
@@ -32,24 +31,11 @@ public final class NotificationInstall implements ISystemUpdate
 	@Override
 	public Uni<Boolean> update(Mutiny.StatelessSession session, IEnterprise<?, ?> enterprise)
 	{
-		return session.createNativeQuery("""
-				        select data_type from information_schema.columns
-				        where table_schema='resource' and table_name='resourceitemxclassification' and column_name='value'
-				        """, String.class)
-		              .getSingleResult()
-		              .invoke(type -> {
-			              if (!"text".equals(type))
-			              {
-				              throw new IllegalStateException(
-						              "Notification bodies require resource.resourceitemxclassification.value to be "
-								              + "PostgreSQL text; found " + type);
-			              }
-		              })
-		              .chain(() -> getISystem(session, NotificationSystem.NAME, enterprise))
-		              .chain(system -> getISystemToken(session, NotificationSystem.NAME, enterprise)
-				              .chain(token -> install(session, system, token)))
-		              .invoke(() -> logProgress("Notification Master", "Installed notification taxonomy", 1))
-		              .replaceWith(Boolean.TRUE);
+		return getISystem(session, NotificationSystem.NAME, enterprise)
+		               .chain(system -> getISystemToken(session, NotificationSystem.NAME, enterprise)
+				               .chain(token -> install(session, system, token)))
+		               .invoke(() -> logProgress("Notification Master", "Installed notification taxonomy", 1))
+		               .replaceWith(Boolean.TRUE);
 	}
 
 	private Uni<Void> install(Mutiny.StatelessSession session, ISystems<?, ?> system, UUID token)
@@ -82,12 +68,6 @@ public final class NotificationInstall implements ISystemUpdate
 				             EnterpriseClassificationDataConcepts.EventXClassification))
 		             .chain(() -> role(session, classes, system, token, CONTEXT_ROLE,
 				             EnterpriseClassificationDataConcepts.EventXClassification))
-		             .chain(() -> role(session, classes, system, token, BODY_TYPE_ROLE,
-				             EnterpriseClassificationDataConcepts.ResourceItemXResourceItemType))
-		             .chain(() -> role(session, classes, system, token, BODY_TEXT_ROLE,
-				             EnterpriseClassificationDataConcepts.ResourceItemXClassification))
-		             .chain(() -> role(session, classes, system, token, BODY_DATA_ROLE,
-				             EnterpriseClassificationDataConcepts.ResourceItemXClassification))
 		             .chain(() -> role(session, classes, system, token, BODY_ROLE,
 				             EnterpriseClassificationDataConcepts.EventXResourceItem))
 

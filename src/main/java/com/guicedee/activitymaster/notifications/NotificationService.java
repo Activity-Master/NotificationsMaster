@@ -1,7 +1,9 @@
 package com.guicedee.activitymaster.notifications;
 
 import com.google.inject.Inject;
+import com.google.inject.Provider;
 import com.guicedee.activitymaster.fsdm.client.services.IActiveFlagService;
+import com.guicedee.activitymaster.fsdm.client.services.IResourceItemService;
 import com.guicedee.activitymaster.fsdm.client.services.ISecurityTokenService;
 import com.guicedee.activitymaster.fsdm.client.services.builders.warehouse.activeflag.IActiveFlag;
 import com.guicedee.activitymaster.fsdm.client.services.builders.warehouse.security.ISecurityToken;
@@ -29,10 +31,12 @@ import com.guicedee.activitymaster.notifications.NotificationModels.Published;
 import com.guicedee.activitymaster.notifications.NotificationModels.Severity;
 import com.guicedee.activitymaster.notifications.NotificationModels.State;
 import io.smallrye.mutiny.Uni;
+import io.vertx.core.json.JsonObject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 import org.hibernate.reactive.mutiny.Mutiny;
 
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -106,13 +110,18 @@ public final class NotificationService implements INotificationService
 	public static final int COUNT_CEILING = 1_000;
 
 	private static final OffsetDateTime END = OffsetDateTime.parse("2999-12-31T23:59:59Z");
-	private static final int MAX_DETAIL = 1_024;
+
+	/** Delivery detail is a classification link value, and relationship values are varchar(150). */
+	private static final int MAX_DETAIL = 150;
 
 	@Inject
 	private IActiveFlagService<?> flags;
 
 	@Inject
 	private ISecurityTokenService<?> security;
+
+	@Inject
+	private Provider<IResourceItemService<?>> resources;
 
 	private final FsdmBehaviorAuthority behaviors = new FsdmBehaviorAuthority();
 
@@ -583,43 +592,52 @@ public final class NotificationService implements INotificationService
 				}));
 	}
 
+	/**
+	 * Writes the body and structured payload as the <em>data</em> of a private resource item.
+	 * <p>
+	 * A relationship value is {@code varchar(150)} and is meant for short discriminators, so a body
+	 * of up to 64k belongs in resource item data, not in a classification link. Body and payload
+	 * travel together as one JSON document, which keeps a read to a single data fetch.
+	 */
 	private Uni<Void> body(Mutiny.StatelessSession session, Ctx ctx, UUID notification, UUID bodyId, String body,
 	                       String data)
 	{
-		return resourceType(session, ctx, BODY_RESOURCE).chain(typeId -> insert(session, ctx,
-				                                                        "resource.resourceitem", "resourceitemid", bodyId,
-				                                                        Map.of("resourceitemdatatype", BODY_RESOURCE))
-		                                                                .chain(() -> link(session, ctx,
-				                                                                "resource.resourceitemxresourceitemtype",
-				                                                                "resourceitemxresourceitemtypeid",
-				                                                                BODY_TYPE_ROLE,
-				                                                                "ResourceItemXResourceItemType",
-				                                                                Map.of("resourceitemid", bodyId,
-						                                                                "resourceitemtypeid", typeId)))
-		                                                                .chain(() -> link(session, ctx,
-				                                                                "resource.resourceitemxclassification",
-				                                                                "resourceitemxclassificationid",
-				                                                                BODY_TEXT_ROLE,
-				                                                                "ResourceItemXClassification",
-				                                                                Map.of("resourceitemid", bodyId,
-						                                                                "value", body)))
-		                                                                .chain(() -> data == null
-				                                                                ? Uni.createFrom()
-				                                                                     .voidItem()
-				                                                                : link(session, ctx,
-						                                                                "resource.resourceitemxclassification",
-						                                                                "resourceitemxclassificationid",
-						                                                                BODY_DATA_ROLE,
-						                                                                "ResourceItemXClassification",
-						                                                                Map.of("resourceitemid",
-								                                                                bodyId, "value",
-								                                                                data)))
-		                                                                .chain(() -> link(session, ctx,
-				                                                                "event.eventxresourceitem",
-				                                                                "eventxresourceitemid", BODY_ROLE,
-				                                                                "EventXResourceItem",
-				                                                                Map.of("eventid", notification,
-						                                                                "resourceitemid", bodyId))));
+		JsonObject document = new JsonObject().put("body", body);
+		if (data != null)
+		{
+			document.put("data", data);
+		}
+		byte[] bytes = document.encode()
+		                       .getBytes(StandardCharsets.UTF_8);
+		return resources.get()
+		                .create(session, BODY_RESOURCE, bodyId, BODY_RESOURCE, bytes, ctx.system,
+				                ctx.identity.tokens())
+		                .chain(() -> link(session, ctx, "event.eventxresourceitem", "eventxresourceitemid", BODY_ROLE,
+				                "EventXResourceItem", Map.of("eventid", notification, "resourceitemid", bodyId)));
+	}
+
+	/**
+	 * Reads the body document back. Returns an empty object when the item is absent or unreadable,
+	 * so a notification whose body row was retired still lists rather than failing the whole read.
+	 */
+	private Uni<JsonObject> bodyDocument(Mutiny.StatelessSession session, Ctx ctx, UUID bodyId)
+	{
+		if (bodyId == null)
+		{
+			return Uni.createFrom()
+			          .item(new JsonObject());
+		}
+		return resources.get()
+		                .findByUUID(session, bodyId)
+		                .chain(item -> item == null
+				                ? Uni.createFrom()
+				                     .<byte[]>nullItem()
+				                : item.getData(session, ctx.identity.tokens()))
+		                .map(bytes -> bytes == null || bytes.length == 0
+				                ? new JsonObject()
+				                : new JsonObject(new String(bytes, StandardCharsets.UTF_8)))
+		                .onFailure()
+		                .recoverWithItem(new JsonObject());
 	}
 
 	/**
@@ -721,19 +739,14 @@ public final class NotificationService implements INotificationService
 				+ " and pr.classificationname='" + PUBLISHER_ROLE + "' limit 1) pub on true";
 	}
 
-	/** Body text and payload in one pass, only joined when a single notification is read. */
+	/** The body resource item id. Its contents are fetched separately, as resource item data. */
 	private static String bodyPivot()
 	{
-		return " left join lateral (select"
-				+ "   max(rc.value) filter (where rcr.classificationname='" + BODY_TEXT_ROLE + "') as text,"
-				+ "   max(rc.value) filter (where rcr.classificationname='" + BODY_DATA_ROLE + "') as data"
+		return " left join lateral (select xri.resourceitemid as bodyid"
 				+ " from event.eventxresourceitem xri"
 				+ " join classification.classification xrr on xrr.classificationid=xri.classificationid"
-				+ " join resource.resourceitemxclassification rc on rc.resourceitemid=xri.resourceitemid"
-				+ " join classification.classification rcr on rcr.classificationid=rc.classificationid"
-				+ " where xri.eventid=n.eventid and " + live("xri") + " and " + live("xrr") + " and " + live("rc")
-				+ " and " + live("rcr") + " and xrr.classificationname='" + BODY_ROLE + "'"
-				+ " and rcr.classificationname in ('" + BODY_TEXT_ROLE + "','" + BODY_DATA_ROLE + "')) bd on true";
+				+ " where xri.eventid=n.eventid and " + live("xri") + " and " + live("xrr")
+				+ " and xrr.classificationname='" + BODY_ROLE + "' limit 1) bd on true";
 	}
 
 	// ── Reads ────────────────────────────────────────────────────────────────────────────────────
@@ -748,7 +761,7 @@ public final class NotificationService implements INotificationService
 
 	private Uni<Notification> findWith(Mutiny.StatelessSession session, Ctx ctx, UUID id)
 	{
-		String sql = "select n.eventid, m.category, m.severity, m.subject, bd.text, bd.data, pub.publisher,"
+		String sql = "select n.eventid, m.category, m.severity, m.subject, bd.bodyid, pub.publisher,"
 				+ " n.created, st.state from " + recipientWindow(LIST_SCAN_CEILING) + markerPivot() + statePivot()
 				+ publisherPivot() + bodyPivot() + " where n.eventid=:id";
 		return session.createNativeQuery(sql, Object[].class)
@@ -758,12 +771,20 @@ public final class NotificationService implements INotificationService
 		              .setParameter("id", id)
 		              .setMaxResults(1)
 		              .getResultList()
-		              .map(rows -> {
+		              .chain(rows -> {
 			              if (rows.isEmpty())
 			              {
-				              throw new NotFoundException();
+				              return Uni.createFrom()
+				                        .failure(new NotFoundException());
 			              }
-			              return notification(rows.getFirst(), true);
+			              Object[] row = rows.getFirst();
+			              // The body lives in resource item data, so it is a second fetch — and only on
+			              // a single read. Lists never pay for it.
+			              return bodyDocument(session, ctx, uuid(row[4])).map(document -> new Notification(
+					              uuid(row[0]), text(row[1]), severity(text(row[2])), text(row[3]),
+					              document.getString("body"), document.getString("data"), uuid(row[5]),
+					              time(row[6]),
+					              row[7] == null ? State.UNREAD : State.valueOf(text(row[7]).toUpperCase(Locale.ROOT))));
 		              });
 	}
 

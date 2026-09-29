@@ -51,11 +51,11 @@
     <build>
         <testResources>
             <testResource><directory>src/test/resources</directory></testResource>
+            <!-- The schema itself comes from the ordered db/*.sql scripts in the core jar, via
+                 FsdmSchema; only the persistence descriptor and cache config are shared here. -->
             <testResource>
                 <directory>../core/src/test/resources</directory>
                 <includes>
-                    <include>postgres_fsdm.sql</include>
-                    <include>postgres_structure.sql</include>
                     <include>META-INF/persistence.xml</include>
                     <include>ehcache.xml</include>
                 </includes>

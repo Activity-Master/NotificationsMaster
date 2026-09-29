@@ -13,7 +13,7 @@ saw it and what reached them survives intact.
 Event (Notification) ──EventXInvolvedParty[NotificationPublisher]──► InvolvedParty
    │                 ──EventXInvolvedParty[NotificationRecipient]──► InvolvedParty (one per recipient)
    │                 ──EventXClassification──► category / severity / subject / context
-   │                 ──EventXResourceItem[NotificationBody]──► ResourceItem (body + JSON payload)
+   │                 ──EventXResourceItem[NotificationBody]──► ResourceItem (body + payload as DATA)
    ├─EventXEvent[NotificationStateOf]────► Event (Notification State)    → READ / DISMISSED / ACKNOWLEDGED
    └─EventXEvent[NotificationDeliveryOf]─► Event (Notification Delivery) → channel + result + detail
 ```
@@ -25,8 +25,10 @@ Event (Notification) ──EventXInvolvedParty[NotificationPublisher]──► I
 | Resource item type | `Notification Body` |
 | Install | `NotificationInstall` (`sortOrder = 1400`) — taxonomy and scoped-behaviour vocabulary only |
 
-Bodies live in `ResourceItemXClassification.value`, so installation asserts that column is
-PostgreSQL `text` rather than silently truncating at Hibernate's default `varchar(255)`.
+The body and structured payload are the **data** of a private resource item, not relationship
+values. A relationship `value` is `varchar(150)` and is for short discriminators, so anything
+larger belongs in resource item data. Only short fields ride as link values: subject (≤150),
+category (≤128), severity, context and delivery detail (≤150).
 
 ## Security contract
 

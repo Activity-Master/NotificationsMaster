@@ -324,6 +324,43 @@ class NotificationStorageTest
 	}
 
 	@Test
+	@DisplayName("A large body round-trips, because it is resource item data and not a link value")
+	void largeBodyRoundTrips()
+	{
+		// Incompressible, so nothing hides behind TOAST compression. A relationship value is
+		// varchar(150); this only works because the body is the resource item's data.
+		StringBuilder big = new StringBuilder();
+		java.util.Random random = new java.util.Random(7);
+		while (big.length() < 40_000)
+		{
+			big.append(Long.toHexString(random.nextLong()));
+		}
+		String body = big.toString();
+		String payload = "{\"k\":\"" + body.substring(0, 8_000) + "\"}";
+
+		Published published = run(c -> service.publish(c.getItem1(), c.getItem3(), identity(publisherId),
+				new Publish("billing", Severity.INFO, "Large body", body, payload, List.of(recipientId),
+						List.of())));
+
+		Notification read = run(c -> service.find(c.getItem1(), c.getItem3(), identity(recipientId),
+				published.id()));
+		assertEquals(body, read.body(), "the full body must come back unchanged");
+		assertEquals(payload, read.data());
+		assertTrue(read.body()
+		               .length() >= 40_000);
+
+		// Lists still omit bodies, so the extra data fetch is only ever paid on a single read.
+		Notification listed = run(c -> service.list(c.getItem1(), c.getItem3(), identity(recipientId), null,
+				null, 0, 100)).items()
+		                      .stream()
+		                      .filter(item -> item.id()
+		                                          .equals(published.id()))
+		                      .findFirst()
+		                      .orElseThrow();
+		assertNull(listed.body());
+	}
+
+	@Test
 	@DisplayName("Malformed and oversized content is rejected before anything is written")
 	void validatesContent()
 	{

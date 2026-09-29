@@ -12,13 +12,23 @@ import java.util.UUID;
  */
 public final class NotificationModels
 {
-	/** Longest subject a notification may carry. */
-	public static final int MAX_SUBJECT = 512;
+	/**
+	 * Longest subject a notification may carry.
+	 * <p>
+	 * The subject is stored as a classification link value so a list can show it without reading
+	 * any bodies, and relationship values are {@code varchar(150)}.
+	 */
+	public static final int MAX_SUBJECT = 150;
 
-	/** Longest body a notification may carry, in UTF-16 code units. */
+	/**
+	 * Longest body a notification may carry, in UTF-16 code units.
+	 * <p>
+	 * The body is held as the data of a private resource item, not as a relationship value, so it is
+	 * not bound by the {@code varchar(150)} that link values are.
+	 */
 	public static final int MAX_BODY = 65_536;
 
-	/** Longest structured payload a notification may carry, in UTF-16 code units. */
+	/** Longest structured payload a notification may carry; stored alongside the body. */
 	public static final int MAX_DATA = 16_384;
 
 	/** Longest category name a notification may carry. */

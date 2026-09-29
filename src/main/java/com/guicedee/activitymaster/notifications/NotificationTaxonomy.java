@@ -48,16 +48,11 @@ public final class NotificationTaxonomy
 	/** {@code EventXClassification} — the publishing context, as the link value. */
 	public static final String CONTEXT_ROLE = "NotificationContext";
 
-	/** {@code ResourceItemXResourceItemType} — links a body item to its type. */
-	public static final String BODY_TYPE_ROLE = "NotificationBodyType";
-
-	/** {@code ResourceItemXClassification} — the body text, as the link value. */
-	public static final String BODY_TEXT_ROLE = "NotificationBodyText";
-
-	/** {@code ResourceItemXClassification} — the structured payload, as the link value. */
-	public static final String BODY_DATA_ROLE = "NotificationBodyData";
-
-	/** {@code EventXResourceItem} — links a notification to its body item. */
+	/**
+	 * {@code EventXResourceItem} — links a notification to the private resource item holding its
+	 * body and payload. The content is that item's <em>data</em>: relationship values are
+	 * {@code varchar(150)} and are for short discriminators, not for bodies.
+	 */
 	public static final String BODY_ROLE = "NotificationBody";
 
 	// ── State roles ──────────────────────────────────────────────────────────────────────────────

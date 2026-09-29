@@ -1,0 +1,3 @@
+com.guicedee.activitymaster.notifications.channels.EventBusNotificationChannel
+com.guicedee.activitymaster.notifications.channels.mail.MailNotificationChannel
+com.guicedee.activitymaster.notifications.channels.WebhookNotificationChannel

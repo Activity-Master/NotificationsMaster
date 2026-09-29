@@ -2,23 +2,91 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-
     <parent>
         <groupId>com.activity-master</groupId>
         <artifactId>activitymaster-group</artifactId>
         <version>3.0.0-SNAPSHOT</version>
+        <relativePath>../parent/pom.xml</relativePath>
     </parent>
-
 
     <artifactId>notification-master</artifactId>
     <packaging>jar</packaging>
     <name>Notification Master</name>
+    <description>Recipient-addressed notifications, append-only state and mail, webhook and event bus delivery</description>
 
     <properties>
         <project.scm.nameUrl>/Activity-Master/NotificationsMaster</project.scm.nameUrl>
     </properties>
-	
+
     <dependencies>
-     
+
+        <dependency>
+            <groupId>com.activity-master</groupId>
+            <artifactId>activity-master</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- Optional: the mail delivery channel compiles against Mail Master but the module
+             runs without it, reporting every mail dispatch as SKIPPED. -->
+        <dependency>
+            <groupId>com.activity-master</groupId>
+            <artifactId>mail-master</artifactId>
+            <version>${project.version}</version>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>io.vertx</groupId>
+            <artifactId>vertx-web-client</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>com.guicedee.modules.services</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
+
+    <build>
+        <testResources>
+            <testResource><directory>src/test/resources</directory></testResource>
+            <testResource>
+                <directory>../core/src/test/resources</directory>
+                <includes>
+                    <include>postgres_fsdm.sql</include>
+                    <include>postgres_structure.sql</include>
+                    <include>META-INF/persistence.xml</include>
+                    <include>ehcache.xml</include>
+                </includes>
+            </testResource>
+        </testResources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs>
+                        <arg>--add-reads</arg>
+                        <arg>org.jboss.logging=org.hibernate.reactive</arg>
+                        <arg>--add-reads</arg>
+                        <arg>org.hibernate.orm.core=com.guicedee.activitymaster.fsdm</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <skip>false</skip>
+                    <argLine>
+                        --add-reads org.jboss.logging=org.hibernate.reactive
+                        --add-reads org.hibernate.orm.core=com.guicedee.activitymaster.fsdm
+                    </argLine>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
 </project>

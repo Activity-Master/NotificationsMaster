@@ -20,6 +20,8 @@ import com.guicedee.activitymaster.fsdm.db.entities.resourceitem.ResourceItemXCl
 import com.guicedee.activitymaster.fsdm.db.entities.resourceitem.ResourceItemXResourceItemType;
 import com.guicedee.activitymaster.fsdm.transactions.ActivityScope;
 import com.guicedee.activitymaster.fsdm.transactions.FsdmBehaviorAuthority;
+import com.guicedee.activitymaster.fsdm.plugins.PluginModels;
+import com.guicedee.activitymaster.fsdm.plugins.PluginService;
 import com.guicedee.activitymaster.notifications.NotificationModels.Channel;
 import com.guicedee.activitymaster.notifications.NotificationModels.Counts;
 import com.guicedee.activitymaster.notifications.NotificationModels.Delivery;
@@ -124,6 +126,7 @@ public final class NotificationService implements INotificationService
 	private Provider<IResourceItemService<?>> resources;
 
 	private final FsdmBehaviorAuthority behaviors = new FsdmBehaviorAuthority();
+    @Inject private PluginService plugins;
 
 	private record Scope(UUID enterprise, UUID system, UUID actor, String context)
 	{
@@ -252,7 +255,10 @@ public final class NotificationService implements INotificationService
 		}
 		boolean work = identity.context()
 		                       .realm() == ActivityScope.Realm.WORK;
-		return session.createNativeQuery("""
+		return (identity.plugin() == null ? Uni.createFrom().voidItem()
+                : plugins.check(session, system, new PluginModels.Identity(identity.partyId(), identity.enterpriseId(),
+                        identity.identityToken()), identity.plugin()))
+                .chain(() -> session.createNativeQuery("""
 				        select 1 from security.securitytoken t where t.securitytoken=:token
 				        and t.enterpriseid=:enterprise and t.effectivefromdate<=statement_timestamp()
 				        and t.effectivetodate>statement_timestamp()
@@ -262,7 +268,7 @@ public final class NotificationService implements INotificationService
 		                                             .toString())
 		              .setParameter("enterprise", s.enterprise())
 		              .setMaxResults(1)
-		              .getResultList()
+		              .getResultList())
 		              .chain(rows -> {
 			              if (rows.isEmpty())
 			              {

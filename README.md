@@ -36,6 +36,12 @@ The host binds `NotificationIdentityProvider` to a **verified, call-scoped** par
 realm/owner context and ActivityMaster identifying credential. The default provider denies every
 request. No path or body parameter ever names the actor.
 
+Plugin calls use the optional fifth `NotificationIdentity` field with a host-bound
+`PluginModels.Invocation` and the authenticated user's credential. Current installation,
+Notification Master declaration, per-user consent and administrator policies are checked
+alongside the existing recipient and behavior permissions. Hosts must preserve the
+invocation when calling from another Master. See [the plugin contract](../core/docs/plugins.md).
+
 * **Publishing** requires the `notifications.publish` scoped behaviour grant.
 * **Reading delivery attempts** requires `notifications.audit`.
 * **Everything else** is available only to a recipient of the notification in question.

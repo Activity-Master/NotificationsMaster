@@ -1,6 +1,7 @@
 package com.guicedee.activitymaster.notifications;
 
 import com.guicedee.activitymaster.fsdm.transactions.ActivityScope;
+import com.guicedee.activitymaster.fsdm.plugins.PluginModels.Invocation;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -14,8 +15,11 @@ import java.util.UUID;
  * @param identityToken the ActivityMaster identifying credential of the actor
  */
 public record NotificationIdentity(UUID partyId, UUID enterpriseId, ActivityScope.Context context,
-                                   UUID identityToken)
+                                   UUID identityToken, Invocation plugin)
 {
+    public NotificationIdentity(UUID partyId, UUID enterpriseId, ActivityScope.Context context, UUID identityToken) {
+        this(partyId, enterpriseId, context, identityToken, null);
+    }
 	public NotificationIdentity
 	{
 		Objects.requireNonNull(partyId, "partyId");

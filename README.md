@@ -180,7 +180,55 @@ Register an `INotificationChannel` with a lower `sortOrder()` to replace a built
 
 ## Tests
 
+The combined forums/conversations/notifications HTTP GraphQL regression lives
+in Forum Master's `CommunicationsGraphQLTest`; its contract tests also cover
+signed 64-bit count serialization and sanitized GraphQL errors.
+
 `NotificationContractTest` and `MailChannelIsolationTest` are fast unit suites: identity
 invariants, defensive copying, webhook destination rules, and the optional-dependency isolation
 guard. `NotificationStorageTest` runs the real FSDM path against a containerised PostgreSQL and
 needs Docker.
+
+## GraphQL
+
+`NotificationGraphQLSchemaProvider` contributes typed operations to the host's
+GuicedEE GraphQL endpoint, normally `/graphql`. JPMS and `META-INF/services`
+register it when `notification-master` is installed. It delegates every operation
+to `NotificationApi`; the host must bind `NotificationIdentityProvider` to the
+verified caller. The adapter subscribes within the server's HTTP call scope and
+the API captures identity before opening its stateless transaction.
+
+Queries: `notification`, `notifications`, `notificationCounts`,
+`notificationDeliveries`.
+Mutations: `notificationPublish`, `notificationRead`, `notificationDismiss`,
+`notificationAcknowledge`, `notificationReadAll`.
+All operations require `enterprise`; individual targets use `notificationId`.
+List filters are optional `state` and `category`. Delivery and notification pages
+default to offset 0 and limit 50 and retain the REST pagination bounds.
+
+```graphql
+query Inbox {
+  notifications(enterprise: "Example", state: UNREAD, limit: 20) {
+    items { id category severity subject publisherId createdAt state }
+    offset limit hasMore
+  }
+  notificationCounts(enterprise: "Example") { unread total capped }
+}
+```
+
+`NotificationPublishInput` contains `category`, `subject`, `body`, `recipients`
+and optional `severity` (default `INFO`), JSON text `data`, and `channels`
+(default `[]`, store only). Enums preserve the service's severity, state, channel
+and delivery-result values. Publication requires `notifications.publish` and
+delivery inspection requires `notifications.audit`. Dispatch remains asynchronous
+after commit. IDs identify targets; GraphQL has no caller identity/token argument.
+
+`Notification.body` and `Notification.data` are nullable: list results omit both;
+use `notification` for a full read. Counts include `capped`, and `NotificationLong`
+preserves the service's signed 64-bit counts as JSON numbers. `notificationReadAll`
+returns the number changed; repeat until zero. State changes affect only the
+verified recipient and preserve the existing append-only/idempotent behavior.
+
+Errors expose `FORBIDDEN`, `NOT_FOUND`, `BAD_USER_INPUT` or `INTERNAL_SERVER_ERROR`
+in `extensions.code`, with sanitized messages. Another recipient's notification
+remains indistinguishable from a missing notification.

@@ -23,11 +23,16 @@ module com.guicedee.activitymaster.notifications {
 
 	uses INotificationChannel;
 
+    requires com.guicedee.vertx.graphql;
 	exports com.guicedee.activitymaster.notifications;
 	exports com.guicedee.activitymaster.notifications.channels;
 	exports com.guicedee.activitymaster.notifications.channels.mail;
 	exports com.guicedee.activitymaster.notifications.rest;
 
+    exports com.guicedee.activitymaster.notifications.graphql;
+    opens com.guicedee.activitymaster.notifications.graphql to com.google.guice;
+    provides com.guicedee.vertx.graphql.services.IGraphQLSchemaProvider
+        with com.guicedee.activitymaster.notifications.graphql.NotificationGraphQLSchemaProvider;
 	opens com.guicedee.activitymaster.notifications to com.google.guice, tools.jackson.databind;
 	opens com.guicedee.activitymaster.notifications.channels to com.google.guice, tools.jackson.databind;
 	opens com.guicedee.activitymaster.notifications.channels.mail to com.google.guice, tools.jackson.databind;

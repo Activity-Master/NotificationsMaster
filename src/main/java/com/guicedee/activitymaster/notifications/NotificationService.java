@@ -84,10 +84,10 @@ import static com.guicedee.activitymaster.notifications.NotificationTaxonomy.*;
  *   <li>Classification, event-type and security lookups are resolved once per operation and reused.
  *       Publishing to 500 recipients resolves the recipient role once, not 500 times.</li>
  * </ul>
- * The access paths rely on the FK indexes the FSDM schema already creates — notably
- * {@code event.eventxinvolvedparty (involvedpartyid)} for the recipient drive, and
- * {@code event.eventxevent (parenteventid)} for state and delivery lookups — so no extra index is
- * needed.
+ * Shared FSDM domain indexes cover scoped, current recipient links and classification pivots,
+ * avoiding retained history on those reads. Existing current parent/child indexes serve state
+ * and delivery links; payloads remain primary-key lookups. These access paths are installed by
+ * the ordered core schema updates, including {@code 25.forum-notification-query-indexes.sql}.
  */
 public final class NotificationService implements INotificationService
 {

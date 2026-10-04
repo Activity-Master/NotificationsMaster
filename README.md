@@ -94,6 +94,18 @@ Paging is `offset` 0..10,000 and `limit` 1..100; responses carry `hasMore` and n
 count. List responses omit bodies — fetch one notification to get its body. With no `state` filter,
 dismissed notifications are excluded from the list but remain directly readable.
 
+Stateless hosts can use `INotificationService.history` for all recipient history, including
+dismissed notifications, with a `(beforeTime, beforeId)` cursor. Both cursor fields must be
+present or absent together. It returns at most `limit` rows and obtains `hasMore` from one extra
+row, ordering by creation time and ID descending. Cursor selection happens before the limit,
+so older history remains reachable and newer arrivals do not shift subsequent pages. History
+omits body/data; `find` applies the requested ID before its limit and returns the complete message.
+All recipient queries check the notification context realm; Work also checks the context owner.
+
+`INotificationService.unreadBadge` searches the caller's complete realm inbox, stops at 100
+unread rows and returns that capped value for a `99+` badge. It does not derive unread counts
+from the limited latest-message list.
+
 `GET /counts` returns `{"unread":n,"total":n,"capped":false}`. `capped` is true when the count hit
 its ceiling, so the figures are lower bounds and a badge should render `999+`.
 
@@ -104,7 +116,8 @@ dropped and the response reports who was actually addressed.
 
 ## Behaviour under load
 
-Every statement the service issues is bounded, and every ordered result is newest first.
+Result sizes are bounded, and every ordered result is newest first. Cursor history and the badge
+query can search older recipient links without the offset list's working-set ceiling.
 
 | Concern | How it is bounded |
 |---------|-------------------|
@@ -113,6 +126,8 @@ Every statement the service issues is bounded, and every ordered result is newes
 | List / deliveries | `limit` + 1 to compute `hasMore`, offset ≤ 10,000, limit ≤ 100 |
 | Recipient working set | Narrowed to the newest 10,100 before any filter or sort |
 | `counts` | Stops at 1,000 and reports `capped` |
+| `history` | Cursor applies before `limit` + 1; no offset/history ceiling |
+| `unreadBadge` | Stops after finding 100 unread messages across the complete realm inbox |
 | `read-all` | 200 notifications per call |
 | `publish` | 500 recipients, and the recipient lookup is limited to that |
 

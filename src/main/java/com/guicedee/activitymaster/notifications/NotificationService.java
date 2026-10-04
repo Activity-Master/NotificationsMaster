@@ -678,7 +678,7 @@ public final class NotificationService implements INotificationService
 	 * multiply into duplicate notifications, and the inner {@code limit} means no caller can make the
 	 * database sort more than {@link #LIST_SCAN_CEILING} rows however many notifications they hold.
 	 */
-	private static String recipientWindow(int ceiling)
+	private static String recipientWindow(int ceiling, Ctx ctx, String extra)
 	{
 		return """
 				(select distinct r.eventid as eventid, e.warehousecreatedtimestamp as created
@@ -695,8 +695,14 @@ public final class NotificationService implements INotificationService
 				+ "   and rr.classificationname='" + RECIPIENT_ROLE + "'"
 				+ "   and tr.classificationname='" + NOTIFICATION_TYPE_ROLE + "'"
 				+ "   and t.eventtypename='" + NOTIFICATION_EVENT + "'"
-				+ " order by e.warehousecreatedtimestamp desc, r.eventid desc"
-				+ " limit " + ceiling + ") n";
+				+ " and exists(select 1 from event.eventxclassification cx join classification.classification cr on cr.classificationid=cx.classificationid"
+                + " where cx.eventid=e.eventid and " + live("cx") + " and " + live("cr")
+                + " and cr.classificationname='" + CONTEXT_ROLE + "' and cx.value like '"
+                + ctx.identity.context().realm().name() + ":"
+                + (ctx.identity.context().realm() == ActivityScope.Realm.WORK ? ctx.identity.enterpriseId().toString() : "%") + "')"
+                + extra
+                + " order by e.warehousecreatedtimestamp desc, r.eventid desc"
+				+ (ceiling > 0 ? " limit " + ceiling : "") + ") n";
 	}
 
 	/**
@@ -768,7 +774,7 @@ public final class NotificationService implements INotificationService
 	private Uni<Notification> findWith(Mutiny.StatelessSession session, Ctx ctx, UUID id)
 	{
 		String sql = "select n.eventid, m.category, m.severity, m.subject, bd.bodyid, pub.publisher,"
-				+ " n.created, st.state from " + recipientWindow(LIST_SCAN_CEILING) + markerPivot() + statePivot()
+				+ " n.created, st.state from " + recipientWindow(1, ctx, " and e.eventid=:id") + markerPivot() + statePivot()
 				+ publisherPivot() + bodyPivot() + " where n.eventid=:id";
 		return session.createNativeQuery(sql, Object[].class)
 		              .setParameter("enterprise", ctx.scope.enterprise())
@@ -804,7 +810,7 @@ public final class NotificationService implements INotificationService
 		return reader(session, system, identity, null).chain(ctx -> {
 			StringBuilder sql = new StringBuilder("select n.eventid, m.category, m.severity, m.subject,"
 					+ " cast(null as text), cast(null as text), pub.publisher, n.created, st.state from ")
-					.append(recipientWindow(LIST_SCAN_CEILING))
+					.append(recipientWindow(LIST_SCAN_CEILING, ctx, ""))
 					.append(markerPivot())
 					.append(statePivot())
 					.append(publisherPivot())
@@ -859,6 +865,39 @@ public final class NotificationService implements INotificationService
 		});
 	}
 
+    @Override
+    public Uni<Long> unreadBadge(Mutiny.StatelessSession session, ISystems<?, ?> system, NotificationIdentity identity) {
+        return reader(session,system,identity,null).chain(ctx -> session.createNativeQuery(
+                "select count(*) from (select n.eventid from " + recipientWindow(0,ctx,"") + statePivot()
+                + " where st.state is null limit 100) unread",Long.class)
+                .setParameter("enterprise",ctx.scope.enterprise()).setParameter("system",ctx.scope.system())
+                .setParameter("actor",ctx.scope.actor()).getSingleResult());
+    }
+
+    @Override
+    public Uni<NotificationModels.History> history(Mutiny.StatelessSession session, ISystems<?, ?> system,
+            NotificationIdentity identity, OffsetDateTime beforeTime, UUID beforeId, int limit) {
+        page(0, limit);
+        require((beforeTime == null) == (beforeId == null), "Complete history cursor required");
+        return reader(session, system, identity, null).chain(ctx -> {
+            String cursor = beforeTime == null ? "" : " and (e.warehousecreatedtimestamp, e.eventid)<(:beforeTime, :beforeId)";
+            String sql = "select n.eventid, m.category, m.severity, m.subject, cast(null as text), cast(null as text),"
+                    + " pub.publisher, n.created, st.state from " + recipientWindow(limit + 1, ctx, cursor)
+                    + markerPivot() + statePivot() + publisherPivot() + " order by n.created desc, n.eventid desc";
+            var query = session.createNativeQuery(sql, Object[].class)
+                    .setParameter("enterprise", ctx.scope.enterprise()).setParameter("system", ctx.scope.system())
+                    .setParameter("actor", ctx.scope.actor());
+            if (beforeTime != null) query.setParameter("beforeTime", beforeTime).setParameter("beforeId", beforeId);
+            return query.setMaxResults(limit + 1).getResultList().map(rows -> {
+                boolean more = rows.size() > limit;
+                List<Notification> items = rows.stream().limit(limit).map(row -> notification(row, false)).toList();
+                Notification last = more ? items.getLast() : null;
+                return new NotificationModels.History(items, last == null ? null : last.createdAt(),
+                        last == null ? null : last.id(), more);
+            });
+        });
+    }
+
 	@Override
 	public Uni<Counts> counts(Mutiny.StatelessSession session, ISystems<?, ?> system, NotificationIdentity identity)
 	{
@@ -866,7 +905,7 @@ public final class NotificationService implements INotificationService
 				                                                           "select count(*) filter (where q.state is null), "
 						                                                           + "count(*) filter (where coalesce(q.state,'')<>'" + State.DISMISSED.name()
 						                                                           + "'), count(*) from (select st.state as state from "
-						                                                           + recipientWindow(COUNT_CEILING) + statePivot() + ") q", Object[].class)
+						                                                           + recipientWindow(COUNT_CEILING, ctx, "") + statePivot() + ") q", Object[].class)
 		                                                                   .setParameter("enterprise",
 				                                                                   ctx.scope.enterprise())
 		                                                                   .setParameter("system", ctx.scope.system())
@@ -916,7 +955,7 @@ public final class NotificationService implements INotificationService
 		String filter = bounded(category, NotificationModels.MAX_CATEGORY, "category", false);
 		return writer(session, system, identity, null).chain(ctx -> {
 			StringBuilder sql = new StringBuilder("select n.eventid from ").append(
-					                                                               recipientWindow(LIST_SCAN_CEILING))
+					                                                               recipientWindow(LIST_SCAN_CEILING, ctx, ""))
 			                                                               .append(markerPivot())
 			                                                               .append(statePivot())
 			                                                               .append(" where st.state is null");

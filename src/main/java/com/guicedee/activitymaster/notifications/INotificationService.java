@@ -24,6 +24,12 @@ import java.util.UUID;
  */
 public interface INotificationService
 {
+    /** Counts unread across the realm inbox, stopping at 100 for a 99+ badge. */
+    Uni<Long> unreadBadge(Mutiny.StatelessSession session, ISystems<?, ?> system, NotificationIdentity identity);
+	/** Complete recipient history, including dismissed messages, using a stable date/ID cursor. */
+	Uni<NotificationModels.History> history(Mutiny.StatelessSession session, ISystems<?, ?> system,
+	        NotificationIdentity identity, java.time.OffsetDateTime beforeTime, UUID beforeId, int limit);
+
 	/** Behaviour grant a publisher must hold. */
 	String PUBLISH_BEHAVIOR = "notifications.publish";
 

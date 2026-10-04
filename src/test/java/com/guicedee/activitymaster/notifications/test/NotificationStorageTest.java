@@ -168,6 +168,40 @@ class NotificationStorageTest
 						"{\"invoice\":\"INV-1\"}", recipients, List.of())));
 	}
 
+    @Test
+    void completeHistoryIncludesDismissedAndUsesStableCursor() {
+        UUID recipient = run(c -> party(IGuiceContext.get(IInvolvedPartyService.class),c).map(p -> p.getId()));
+        List<UUID> ids = new java.util.ArrayList<>();
+        for(int i=0;i<5;i++) ids.add(publish(List.of(recipient)).id());
+        run(c -> service.transition(c.getItem1(),c.getItem3(),identity(recipient),ids.getFirst(),State.DISMISSED));
+        var first = run(c -> service.history(c.getItem1(),c.getItem3(),identity(recipient),null,null,2));
+        assertTrue(first.hasMore());
+        UUID arrived = publish(List.of(recipient)).id();
+        var second = run(c -> service.history(c.getItem1(),c.getItem3(),identity(recipient),first.beforeTime(),first.beforeId(),2));
+        var third = run(c -> service.history(c.getItem1(),c.getItem3(),identity(recipient),second.beforeTime(),second.beforeId(),2));
+        var collected = java.util.stream.Stream.of(first,second,third).flatMap(page -> page.items().stream()).toList();
+        assertEquals(5,collected.size());
+        assertEquals(5,collected.stream().map(Notification::id).distinct().count());
+        assertFalse(collected.stream().anyMatch(item -> item.id().equals(arrived)));
+        assertTrue(collected.stream().anyMatch(item -> item.id().equals(ids.getFirst()) && item.state()==State.DISMISSED));
+        assertFalse(third.hasMore());
+        assertNull(third.beforeTime());
+        assertEquals(5L,run(c -> service.unreadBadge(c.getItem1(),c.getItem3(),identity(recipient))).longValue());
+        assertThrows(BadRequestException.class,() -> run(c -> service.history(c.getItem1(),c.getItem3(),identity(recipient),first.beforeTime(),null,2)));
+        assertDescending(collected.stream().map(Notification::createdAt).toList());
+    }
+
+    @Test
+    void recipientReadsDoNotCrossRealms() {
+        var published=publish(List.of(recipientId));
+        var personal=new NotificationIdentity(recipientId,enterpriseId,
+            new ActivityScope.Context(ActivityScope.Realm.PERSONAL,recipientId),token);
+        assertThrows(NotFoundException.class,() -> run(c -> service.find(c.getItem1(),c.getItem3(),personal,published.id())));
+        assertTrue(run(c -> service.history(c.getItem1(),c.getItem3(),personal,null,null,20)).items().isEmpty());
+        assertEquals(0L,run(c -> service.unreadBadge(c.getItem1(),c.getItem3(),personal)).longValue());
+        assertThrows(NotFoundException.class,() -> run(c -> service.transition(c.getItem1(),c.getItem3(),personal,published.id(),State.READ)));
+    }
+
 	@Test
 	@DisplayName("Publishing needs the grant, and only recipients can see the result")
 	void publishesToRecipientsOnly()

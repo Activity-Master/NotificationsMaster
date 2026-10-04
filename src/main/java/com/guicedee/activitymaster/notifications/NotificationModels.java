@@ -156,6 +156,11 @@ public final class NotificationModels
 	{
 	}
 
+	/** Cursor pagination reaches older history without an offset or recent-window ceiling. */
+	public record History(List<Notification> items, OffsetDateTime beforeTime, UUID beforeId, boolean hasMore) {
+		public History { items = List.copyOf(items); }
+	}
+
 	/**
 	 * A bounded page. No unfiltered total is exposed.
 	 *

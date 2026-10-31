@@ -30,6 +30,7 @@ public class PostgreSQLTestDBModule extends DatabaseModule<PostgreSQLTestDBModul
 		implements IGuiceModule<PostgreSQLTestDBModule>
 {
 	static final PostgreSQLContainer<?> DATABASE = new PostgreSQLContainer<>("postgres:17-alpine")
+			.withCommand("postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track_planning=on")
 			.withDatabaseName("fsdm")
 			.withUsername("postgres")
 			.withPassword("postgres");

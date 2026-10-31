@@ -78,6 +78,14 @@ public interface INotificationService
 	Uni<Page<Notification>> list(Mutiny.StatelessSession session, ISystems<?, ?> system,
 	                             NotificationIdentity identity, State state, String category, int offset, int limit);
 
+    /**
+     * Newest undismissed notifications, including readable bodies, for the verified recipient.
+     * One request-local authorization pass; existing recipient-gated body retrieval is retained.
+     * The limit is 1..100. No domain or authorization results survive the call.
+     */
+    Uni<java.util.List<Notification>> latest(Mutiny.StatelessSession session, ISystems<?, ?> system,
+                                            NotificationIdentity identity, int limit);
+
 	/**
 	 * Counts the caller's unread and undismissed notifications.
 	 *

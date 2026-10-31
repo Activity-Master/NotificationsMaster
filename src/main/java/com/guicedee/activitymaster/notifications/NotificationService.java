@@ -800,6 +800,36 @@ public final class NotificationService implements INotificationService
 		              });
 	}
 
+    @Override
+    public Uni<List<Notification>> latest(Mutiny.StatelessSession session, ISystems<?, ?> system,
+                                          NotificationIdentity identity, int limit) {
+        page(0, limit);
+        return reader(session, system, identity, null).chain(ctx -> {
+            // Filter state before limiting; headers and body links are needed only for returned rows.
+            String sql = "with inbox as materialized (select n.eventid,n.created,st.state from "
+                    + recipientWindow(LIST_SCAN_CEILING,ctx,"") + statePivot()
+                    + " where coalesce(st.state,'')<>'" + State.DISMISSED.name()
+                    + "' order by n.created desc,n.eventid desc limit " + limit + ")"
+                    + " select n.eventid,m.category,m.severity,m.subject,bd.bodyid,pub.publisher,n.created,n.state"
+                    + " from inbox n" + markerPivot() + publisherPivot() + bodyPivot()
+                    + " order by n.created desc,n.eventid desc";
+            return session.createNativeQuery(sql,Object[].class)
+                    .setParameter("enterprise",ctx.scope.enterprise())
+                    .setParameter("system",ctx.scope.system()).setParameter("actor",ctx.scope.actor())
+                    .setMaxResults(limit).getResultList().chain(rows -> {
+                        Uni<List<Notification>> result=Uni.createFrom().item(new ArrayList<>());
+                        for (Object[] row:rows) {
+                            result=result.chain(items -> bodyDocument(session,ctx,uuid(row[4])).invoke(document ->
+                                items.add(new Notification(uuid(row[0]),text(row[1]),severity(text(row[2])),text(row[3]),
+                                    document.getString("body"),document.getString("data"),uuid(row[5]),time(row[6]),
+                                    row[7]==null ? State.UNREAD : State.valueOf(text(row[7]).toUpperCase(Locale.ROOT)))))
+                                .replaceWith(items));
+                        }
+                        return result;
+                    });
+        });
+    }
+
 	@Override
 	public Uni<Page<Notification>> list(Mutiny.StatelessSession session, ISystems<?, ?> system,
 	                                    NotificationIdentity identity, State state, String category, int offset,

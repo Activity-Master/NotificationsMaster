@@ -169,6 +169,65 @@ class NotificationStorageTest
 	}
 
     @Test
+    void latestMatchesAuthorizedDetailReadsAndFreshState() throws Exception {
+        UUID actor = run(c -> party(IGuiceContext.get(IInvolvedPartyService.class),c).map(p -> p.getId()));
+        for(int i=0;i<10;i++) publish(List.of(actor));
+        var before=run(c -> service.latest(c.getItem1(),c.getItem3(),identity(actor),8));
+        assertEquals(8,before.size());
+        for(var item:before) assertEquals(run(c -> service.find(c.getItem1(),c.getItem3(),identity(actor),item.id())),item);
+        run(c -> service.transition(c.getItem1(),c.getItem3(),identity(actor),before.getFirst().id(),State.DISMISSED));
+        var after=run(c -> service.latest(c.getItem1(),c.getItem3(),identity(actor),8));
+        assertEquals(8,after.size());
+        assertFalse(after.stream().anyMatch(n -> n.id().equals(before.getFirst().id())));
+        assertTrue(run(c -> service.latest(c.getItem1(),c.getItem3(),identity(outsiderId),8)).isEmpty());
+        fixture.disable(after.getFirst().id());
+        assertFalse(run(c -> service.latest(c.getItem1(),c.getItem3(),identity(actor),8)).stream()
+            .anyMatch(n -> n.id().equals(after.getFirst().id())));
+        var invalid=new NotificationIdentity(actor,enterpriseId,new ActivityScope.Context(ActivityScope.Realm.WORK,enterpriseId),UUID.randomUUID());
+        assertThrows(SecurityException.class,() -> run(c -> service.latest(c.getItem1(),c.getItem3(),invalid,8)));
+
+        assertThrows(BadRequestException.class,() -> run(c -> service.latest(c.getItem1(),c.getItem3(),identity(actor),101)));
+        assertThrows(BadRequestException.class,() -> run(c -> service.latest(c.getItem1(),c.getItem3(),identity(actor),0)));
+        var personal=new NotificationIdentity(actor,enterpriseId,new ActivityScope.Context(ActivityScope.Realm.PERSONAL,actor),token);
+        assertTrue(run(c -> service.latest(c.getItem1(),c.getItem3(),personal,8)).isEmpty());
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named="ne1.notifications.performance", matches="true")
+    void measureEightItemInbox() throws Exception {
+        UUID actor = run(c -> party(IGuiceContext.get(IInvolvedPartyService.class),c).map(p -> p.getId()));
+        for (int i=0;i<12;i++) publish(List.of(actor));
+        var db=PostgreSQLTestDBModule.DATABASE;
+        var extension=db.execInContainer("psql","-U",db.getUsername(),"-d",db.getDatabaseName(),"-c","CREATE EXTENSION IF NOT EXISTS pg_stat_statements");
+        assertEquals(0,extension.getExitCode());
+        for (int sample=0;sample<35;sample++) {
+            if(sample==5) assertEquals(0,db.execInContainer("psql","-U",db.getUsername(),"-d",db.getDatabaseName(),"-c","SELECT pg_stat_statements_reset()").getExitCode());
+            final int index=sample;
+            run(c -> {
+                long started=System.nanoTime();
+                Uni<List<Notification>> operation;
+                if(Boolean.getBoolean("ne1.notifications.baseline")) {
+                    operation=service.list(c.getItem1(),c.getItem3(),identity(actor),null,null,0,8).chain(page -> {
+                        Uni<List<Notification>> result=Uni.createFrom().item(new java.util.ArrayList<>());
+                        for(var entry:page.items()) result=result.chain(items -> service.find(c.getItem1(),c.getItem3(),identity(actor),entry.id())
+                            .invoke(items::add).replaceWith(items));
+                        return result;
+                    });
+                } else operation=service.latest(c.getItem1(),c.getItem3(),identity(actor),8);
+                return operation.invoke(items -> {
+                    assertEquals(8,items.size());
+                    for(var item:items) {assertEquals("Your invoice is overdue.",item.body()); assertEquals("{\"invoice\":\"INV-1\"}",item.data());}
+                    System.out.println("INBOX_SAMPLE,"+index+","+((System.nanoTime()-started)/1_000_000.0));
+                });
+            });
+        }
+        var stats=db.execInContainer("psql","-U",db.getUsername(),"-d",db.getDatabaseName(),"-At","-c",
+            "SELECT json_agg(s) FROM (SELECT query,calls,total_plan_time,total_exec_time,rows FROM pg_stat_statements WHERE query NOT LIKE '%pg_stat_statements%' ORDER BY calls DESC) s");
+        assertEquals(0,stats.getExitCode());
+        java.nio.file.Files.writeString(java.nio.file.Path.of(System.getProperty("ne1.notifications.stats","/tmp/phase6-notification-stats.json")),stats.getStdout());
+    }
+
+    @Test
     void completeHistoryIncludesDismissedAndUsesStableCursor() {
         UUID recipient = run(c -> party(IGuiceContext.get(IInvolvedPartyService.class),c).map(p -> p.getId()));
         List<UUID> ids = new java.util.ArrayList<>();
